@@ -65,29 +65,58 @@ def write_mozlz4(path: Path, obj) -> None:
 # ------------------------------------------------------------------ discovery
 def arc_sidebar_path() -> Path:
     """Locate Arc's StorableSidebar.json for the current platform."""
-    if platform.system() == "Windows":
+    system = platform.system()
+    if system == "Windows":
         base = Path(os.environ["LOCALAPPDATA"]) / "Packages"
         for pkg in base.glob("TheBrowserCompany.Arc_*"):
             candidate = pkg / "LocalCache" / "Local" / "Arc" / "StorableSidebar.json"
             if candidate.exists():
                 return candidate
-    else:  # macOS
+    elif system == "Darwin":
         candidate = Path.home() / "Library/Application Support/Arc/StorableSidebar.json"
         if candidate.exists():
             return candidate
+    else:
+        # Arc was never released for Linux, so there is nothing to auto-detect. Copying
+        # StorableSidebar.json off a Mac or Windows machine and passing --arc works.
+        raise SystemExit(
+            "Arc has no Linux build, so there is no local Arc data to read.\n"
+            "Copy StorableSidebar.json from a Mac or Windows machine and pass --arc PATH."
+        )
     raise SystemExit("Arc data not found. Is Arc installed for this user?")
+
+
+def zen_data_roots() -> list[Path]:
+    """Candidate Zen data directories, most likely first."""
+    system = platform.system()
+    if system == "Windows":
+        return [Path(os.environ["APPDATA"]) / "zen"]
+    if system == "Darwin":
+        return [Path.home() / "Library/Application Support/zen"]
+    # Linux moved from ~/.zen to the XDG config dir in Zen 1.18.6b, but keeps using the
+    # legacy folder when it already exists. Flatpak adds its own sandboxed roots.
+    home = Path.home()
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    flatpak = home / ".var/app/app.zen_browser.zen"
+    return [
+        home / ".zen",
+        xdg / "zen",
+        flatpak / ".zen",
+        flatpak / "zen",
+        flatpak / "config/zen",
+    ]
 
 
 def zen_profile_dir() -> Path:
     """Resolve the Zen profile the installed build actually launches."""
-    if platform.system() == "Windows":
-        root = Path(os.environ["APPDATA"]) / "zen"
-    elif platform.system() == "Darwin":
-        root = Path.home() / "Library/Application Support/zen"
-    else:
-        root = Path.home() / ".zen"
-    if not root.exists():
-        raise SystemExit(f"Zen data directory not found at {root}. Run Zen once first.")
+    candidates = zen_data_roots()
+    root = next((c for c in candidates if (c / "profiles.ini").exists()), None)
+    if root is None:
+        listed = "\n  ".join(str(c) for c in candidates)
+        raise SystemExit(
+            "No Zen profile found. Run Zen once first, or pass --profile.\n"
+            f"Looked in:\n  {listed}"
+        )
 
     # installs.ini names the profile tied to this installation and wins over the
     # Default=1 flag in profiles.ini, which can point at an unused profile.
@@ -115,9 +144,12 @@ def zen_profile_dir() -> Path:
 def zen_is_running(profile: Path) -> bool:
     """A live Zen holds the profile lock; writing underneath it loses the changes."""
     if platform.system() == "Windows":
-        out = os.popen("tasklist").read().lower()
-        return "zen.exe" in out
-    return bool(os.popen("pgrep -x zen 2>/dev/null").read().strip())
+        return "zen.exe" in os.popen("tasklist").read().lower()
+    # The binary is 'zen' on most builds and 'zen-bin' on some Linux packages.
+    for name in ("zen", "zen-bin"):
+        if os.popen(f"pgrep -x {name} 2>/dev/null").read().strip():
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ Arc model
