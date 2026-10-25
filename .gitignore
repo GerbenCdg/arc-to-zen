@@ -1,0 +1,15 @@
+# Scratch and anything that could carry personal browsing data.
+tmp/
+*.jsonlz4
+*.baklz4
+*.ico
+StorableSidebar.json
+decoded/
+*-backup/
+*-backup-*/
+bookmarks*.html
+zen-bookmarks*.html
+arc-tree.txt
+__pycache__/
+*.pyc
+.venv/
